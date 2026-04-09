@@ -1,141 +1,112 @@
 # git-ai-summary
 
-CLI: собирает контекст из **git** (логи и список файлов за период), отправляет в **OpenAI / Anthropic / OpenAI-compatible** API и печатает таблицу **TSV / CSV / Markdown / JSON** для демо или отчётов.
+CLI tool: reads **git** history for a time range, sends it to **OpenAI**, **Anthropic**, or any **OpenAI-compatible** API, and prints an AI-generated summary (for demos or reports).
 
-## Требования
+## Requirements
 
-- **Пребилды:** только `git` в `PATH` (и при установке через скрипт — `curl`).
-- **Сборка из исходников:** [Go](https://go.dev/dl/) 1.22+ и `git`.
+- **Prebuilt binary:** `git` on your `PATH` (and `curl` if you use the install script).
+- **From source:** [Go](https://go.dev/dl/) 1.22+ and `git`.
 
-## Установка
+## Install
 
-Поддерживаются **macOS** (Apple Silicon, Intel), **Linux** (x86_64, aarch64), **Windows** (x86_64, ARM64). Готовые бинарники публикуются в [Releases](https://github.com/etozhealkhipce/git-ai-summary/releases). Сборки Linux — статические (`CGO_ENABLED=0`); на очень старых дистрибутивах при проблемах используйте установку из исходников.
+Binaries for **macOS**, **Linux**, and **Windows** are on [Releases](https://github.com/etozhealkhipce/git-ai-summary/releases).
 
-### macOS и Linux
-
-Последний релиз:
+**macOS / Linux** (latest):
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/etozhealkhipce/git-ai-summary/main/install.sh | sh
 ```
 
-Зафиксировать версию:
+Pin a version (`0.1.0`, no `v` prefix):
 
 ```bash
 GIT_AI_SUMMARY_VERSION=0.1.0 curl -sSL https://raw.githubusercontent.com/etozhealkhipce/git-ai-summary/main/install.sh | sh
 ```
 
-Переменные установки:
+Optional: `GIT_AI_SUMMARY_INSTALL_DIR` (default: `$HOME/.local/bin`). Safer: clone the repo and run `./install.sh` after reading the script.
 
-- **GIT_AI_SUMMARY_VERSION** — версия релиза без префикса `v` (например `0.1.0`).
-- **GIT_AI_SUMMARY_INSTALL_DIR** — каталог для бинарника (по умолчанию `$HOME/.local/bin`).
-
-Безопаснее, чем `curl | sh`: склонируйте репозиторий и выполните `./install.sh` локально после просмотра скрипта.
-
-### Windows (PowerShell)
+**Windows (PowerShell):**
 
 ```powershell
 irm https://raw.githubusercontent.com/etozhealkhipce/git-ai-summary/main/install.ps1 | iex
 ```
 
-С версией и своим каталогом:
-
-```powershell
-$env:GIT_AI_SUMMARY_VERSION = "0.1.0"
-$env:GIT_AI_SUMMARY_INSTALL_DIR = "C:\tools\git-ai-summary"
-irm https://raw.githubusercontent.com/etozhealkhipce/git-ai-summary/main/install.ps1 | iex
-```
-
-По умолчанию бинарник в `%LOCALAPPDATA%\git-ai-summary`. Добавьте каталог в **PATH** пользователя, если установщик напомнит об этом.
-
-### Релизы для поддержки (maintainers)
-
-Релиз выполняется **только вручную из GitHub**: откройте [Actions](https://github.com/etozhealkhipce/git-ai-summary/actions) → workflow **release** → **Run workflow**. Выберите ветку (обычно `main`) и тип бампа:
-
-- **auto** — следующая версия по [Conventional Commits](https://www.conventionalcommits.org/) с последнего тега (`fix:` → patch, `feat:` → minor, `BREAKING CHANGE` / `feat!:` / `fix!:` → major, `chore:` и т.п. без релизного бампа не увеличивают версию).
-- **patch** / **minor** / **major** — принудительно увеличить соответствующую часть semver относительно последнего тега.
-
-Workflow сам посчитает версию ([svu](https://github.com/caarlos0/svu)), создаст аннотированный тег `v*` на текущем коммите и запустит [GoReleaser](https://goreleaser.com/) ([.github/workflows/release.yml](.github/workflows/release.yml)).
-
-Если в репозитории ещё **нет ни одного тега**, первый запуск зафиксирует релиз как **v0.1.0** (независимо от выбранного `bump`).
-
-### Настройка API после установки
-
-Интерактивно (ключи и переменные в профиль оболочки или файл для PowerShell):
-
-```bash
-git-ai-summary setup
-```
-
-### Установка из исходников
+**Go install:**
 
 ```bash
 go install github.com/etozhealkhipce/git-ai-summary/cmd/git-ai-summary@latest
 ```
 
-Бинарник в **`$GOBIN`** или **`$GOPATH/bin`** — каталог должен быть в **`PATH`**.
+Put `$GOBIN` or `$GOPATH/bin` on your `PATH`.
 
-Локальная сборка:
+## API keys
+
+Interactive setup (writes env vars to your shell profile or a PowerShell file):
 
 ```bash
-git clone https://github.com/etozhealkhipce/git-ai-summary.git
-cd git-ai-summary
-go build -buildvcs=false -o git-ai-summary ./cmd/git-ai-summary
-```
-
-## Переменные окружения
-
-| Переменная | Назначение |
-|------------|------------|
-| `OPENAI_API_KEY` | Ключ для `openai` и `openai-compatible`. |
-| `ANTHROPIC_API_KEY` | Ключ для `anthropic`. |
-| `GIT_AI_SUMMARY_PROVIDER` | `openai`, `anthropic` или `openai-compatible`, если не указан `-provider`. |
-| `GIT_AI_SUMMARY_BASE_URL` | Базовый URL для `openai-compatible`, если не указан `-base-url`. |
-| `GIT_AI_SUMMARY_MODEL` | ID модели, если не указан `-model`. |
-
-Флаги командной строки имеют приоритет над переменными окружения.
-
-## Использование
-
-```text
-git-ai-summary [-repo path] [-since "7 days ago"] [-max-commits 200] [-max-chars 120000]
-  [-with-stat] [-provider openai|anthropic|openai-compatible] [-model ...] [-base-url ...]
-  [-api-key ...] [-timeout 120] [-format tsv|csv|md|json] [-o file] [-language ru|en]
-  [-dry-run]
-
 git-ai-summary setup
 ```
 
-- По умолчанию репозиторий — **текущая директория** (`-repo` можно не указывать).
-- **`-provider openai-compatible`** требует **`-base-url`** или **`GIT_AI_SUMMARY_BASE_URL`** (например `https://api.openai.com/v1` или базу совместимого провайдера с суффиксом `/v1`).
+Or set the keys yourself (see table below).
 
-### Примеры
+## Environment
 
-Сборка контекста без вызова API:
+| Variable | Purpose |
+|----------|---------|
+| `OPENAI_API_KEY` | OpenAI and OpenAI-compatible providers |
+| `ANTHROPIC_API_KEY` | Anthropic |
+| `GIT_AI_SUMMARY_PROVIDER` | `openai`, `anthropic`, or `openai-compatible` |
+| `GIT_AI_SUMMARY_BASE_URL` | Base URL for `openai-compatible` (needs `/v1` style path if your API uses it) |
+| `GIT_AI_SUMMARY_MODEL` | Model id override |
 
-```bash
-cd ~/work/my-app
-git-ai-summary -dry-run -since "2 weeks ago"
+CLI flags override env vars.
+
+## Usage
+
+```text
+git-ai-summary [options]
+git-ai-summary setup
 ```
 
-OpenAI, TSV в файл:
+Common options:
+
+| Flag | Notes |
+|------|--------|
+| `-repo` | Git repo path (default: current directory) |
+| `-since` | Passed to `git log --since` (default: `7 days ago`) |
+| `-provider` | `openai` (default), `anthropic`, or `openai-compatible` |
+| `-format` | `pretty`, `tsv`, `csv`, `md`, `json` — default is **`pretty` in a terminal**, **`tsv`** when stdout is not a TTY or with `-o` (unless you set `-format`) |
+| `-o` | Write output to a file |
+| `-dry-run` | Print the git bundle only; no API call |
+
+`openai-compatible` needs `-base-url` or `GIT_AI_SUMMARY_BASE_URL`.
+
+Examples:
 
 ```bash
+git-ai-summary -dry-run
 export OPENAI_API_KEY=...
-git-ai-summary -format tsv -o summary.tsv -since "1 week ago"
-```
-
-Anthropic:
-
-```bash
+git-ai-summary -o summary.tsv
 export ANTHROPIC_API_KEY=...
 git-ai-summary -provider anthropic -format md -o summary.md
 ```
 
-## Безопасность
+While waiting for the API, the tool shows a short spinner on stderr (TTY only). Set `NO_COLOR` to disable ANSI colors.
 
-Не коммитьте ключи. Для CI используйте секреты окружения. Команда `setup` может записать ключи в ваш профиль оболочки — это осознанный компромисс удобства; при необходимости задавайте переменные только в сессии или в секрет-хранилище.
+## Releases (maintainers)
 
-## Лицензия
+[Actions](https://github.com/etozhealkhipce/git-ai-summary/actions) → workflow **release** → **Run workflow**. Pick the branch (usually `main`) and bump type: **auto** (from commits since last tag), or **patch** / **minor** / **major**. The workflow tags the commit and runs [GoReleaser](https://goreleaser.com/). If there is no tag yet, the first run uses **v0.1.0**.
 
-MIT, см. [LICENSE](LICENSE).
+Local snapshot build (Docker):
+
+```bash
+make release-snapshot
+```
+
+## Security
+
+Do not commit API keys. Use CI secrets for automation.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

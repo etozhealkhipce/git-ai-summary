@@ -91,21 +91,34 @@ func renderCSV(sr *model.SummaryResponse) string {
 
 func renderMD(sr *model.SummaryResponse) string {
 	var b strings.Builder
-	b.WriteString("| area | path_or_url | summary | ticket |\n")
-	b.WriteString("| --- | --- | --- | --- |\n")
+	b.WriteString("## Changes\n\n")
 	for _, r := range sr.Rows {
-		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
-			mdCell(r.Area), mdCell(r.PathOrURL), mdCell(r.Summary), mdCell(r.Ticket))
+		fmt.Fprintf(&b, "### `%s`\n\n", escapeMDCodeSpan(normalizeCell(r.PathOrURL)))
+		if strings.TrimSpace(r.Area) != "" {
+			fmt.Fprintf(&b, "- **area:** %s\n", mdInline(r.Area))
+		}
+		fmt.Fprintf(&b, "- **summary:** %s\n", mdInline(r.Summary))
+		if strings.TrimSpace(r.Ticket) != "" {
+			fmt.Fprintf(&b, "- **ticket:** %s\n", mdInline(r.Ticket))
+		}
+		b.WriteByte('\n')
 	}
 	if len(sr.Notes) > 0 {
-		b.WriteString("\n**notes**\n\n")
+		b.WriteString("## Notes\n\n")
 		for _, n := range sr.Notes {
-			fmt.Fprintf(&b, "- %s\n", mdCell(n))
+			fmt.Fprintf(&b, "- %s\n", mdInline(n))
 		}
 	}
 	return b.String()
 }
 
-func mdCell(s string) string {
-	return strings.ReplaceAll(s, "|", "\\|")
+func escapeMDCodeSpan(s string) string {
+	return strings.ReplaceAll(s, "`", "'")
+}
+
+// mdInline flattens text and escapes characters that break list/markdown flow in terminals.
+func mdInline(s string) string {
+	s = normalizeCell(s)
+	s = strings.ReplaceAll(s, "`", "'")
+	return s
 }

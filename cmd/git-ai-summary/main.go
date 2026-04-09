@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/etozhealkhipce/git-ai-summary/internal/ai"
@@ -14,6 +15,8 @@ import (
 	"github.com/etozhealkhipce/git-ai-summary/internal/prompt"
 	"github.com/etozhealkhipce/git-ai-summary/internal/render"
 	"github.com/etozhealkhipce/git-ai-summary/internal/setup"
+	"github.com/etozhealkhipce/git-ai-summary/internal/terminal"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -47,12 +50,23 @@ func run() error {
 
 	timeoutSec := fs.Int("timeout", 120, "HTTP timeout seconds")
 	outPath := fs.String("o", "", "write output to file (UTF-8)")
-	format := fs.String("format", "tsv", "tsv | csv | md | json")
+	format := fs.String("format", "", "tsv | csv | md | json | pretty (default: pretty on tty stdout, else tsv; with -o file default tsv)")
 	lang := fs.String("language", "ru", "ru | en (prompt hint)")
 	dryRun := fs.Bool("dry-run", false, "print git bundle only, do not call API")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
+	}
+
+	formatStr := strings.TrimSpace(*format)
+	if formatStr == "" {
+		if strings.TrimSpace(*outPath) != "" {
+			formatStr = "tsv"
+		} else if term.IsTerminal(int(os.Stdout.Fd())) {
+			formatStr = "pretty"
+		} else {
+			formatStr = "tsv"
+		}
 	}
 
 	gb, err := git.Collect(git.Options{
@@ -107,7 +121,7 @@ func run() error {
 		case "openai", "openai-compatible":
 			m = "gpt-4o-mini"
 		case "anthropic":
-			m = "claude-3-5-sonnet-20241022"
+			m = "claude-sonnet-4-6"
 		}
 	}
 
@@ -147,7 +161,26 @@ func run() error {
 		return fmt.Errorf("unknown provider %q", prov)
 	}
 
-	raw, err := completer.Complete(ctx, sys, user)
+	spinMsg := "Ждём ответ модели…"
+	if strings.EqualFold(*lang, "en") {
+		spinMsg = "Waiting for the model…"
+	}
+
+	var raw string
+	if term.IsTerminal(int(os.Stderr.Fd())) {
+		sctx, scancel := context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			terminal.RunSpinner(sctx, os.Stderr, spinMsg)
+		}()
+		raw, err = completer.Complete(ctx, sys, user)
+		scancel()
+		wg.Wait()
+	} else {
+		raw, err = completer.Complete(ctx, sys, user)
+	}
 	if err != nil {
 		return err
 	}
@@ -158,10 +191,30 @@ func run() error {
 		return fmt.Errorf("model output invalid: %w\nraw (truncated): %s", err, truncateStr(raw, 2000))
 	}
 
-	f := render.Format(strings.ToLower(strings.TrimSpace(*format)))
-	out, err := render.Render(f, sr)
-	if err != nil {
-		return err
+	termWidth := 100
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		if wd, _, e := term.GetSize(int(os.Stdout.Fd())); e == nil && wd > 0 {
+			termWidth = wd
+		}
+	}
+
+	toTTY := strings.TrimSpace(*outPath) == "" && term.IsTerminal(int(os.Stdout.Fd()))
+	useColor := toTTY && os.Getenv("NO_COLOR") == ""
+
+	var out string
+	switch strings.ToLower(formatStr) {
+	case "pretty":
+		out = render.Pretty(sr, render.PrettyOptions{
+			Width:  termWidth,
+			Color:  useColor,
+			Locale: *lang,
+		})
+	default:
+		f := render.Format(strings.ToLower(formatStr))
+		out, err = render.Render(f, sr)
+		if err != nil {
+			return err
+		}
 	}
 
 	if strings.TrimSpace(*outPath) != "" {
