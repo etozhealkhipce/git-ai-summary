@@ -1,0 +1,65 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump (auto = from Conventional Commits since last tag)"
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Compute version and create tag
+        run: |
+          set -euo pipefail
+          go install github.com/caarlos0/svu/v2@latest
+          export PATH="$PATH:$(go env GOPATH)/bin"
+
+          if ! git describe --tags --abbrev=0 >/dev/null 2>&1; then
+            echo "No previous tags; using v0.1.0 for first release."
+            TAG="v0.1.0"
+          else
+            case "${{ inputs.bump }}" in
+              auto) TAG="$(svu next)" ;;
+              patch) TAG="$(svu patch)" ;;
+              minor) TAG="$(svu minor)" ;;
+              major) TAG="$(svu major)" ;;
+            esac
+          fi
+
+          echo "Creating tag $TAG"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
